@@ -52,7 +52,7 @@ const (
 
 var (
 	evictionInterval    = time.Minute     // Time interval to check for evictable transactions
-	statsReportInterval = 8 * time.Second // Time interval to report transaction pool stats
+	statsReportInterval = 2 * time.Second // Time interval to report transaction pool stats
 
 	txPoolIsFullErr = fmt.Errorf("txpool is full")
 
@@ -76,6 +76,23 @@ var (
 	invalidTxCounter     = metrics.NewRegisteredCounter("txpool/invalid", nil)
 	underpricedTxCounter = metrics.NewRegisteredCounter("txpool/underpriced", nil)
 	refusedTxCounter     = metrics.NewRegisteredCounter("txpool/refuse", nil)
+
+	addLocalFnCounter     = metrics.NewRegisteredCounter("txpool/fn/addlocal", nil)
+
+	addTxOnAddFn1Counter = metrics.NewRegisteredCounter("txpool/fn/addTxOnAddFn1", nil)
+	addTxOnEnqueueTxFn1Counter = metrics.NewRegisteredCounter("txpool/fn/addTxOnEnqueueTxFn1", nil)
+	addTxOnPromoteTxFn1Counter = metrics.NewRegisteredCounter("txpool/fn/addTxOnPromoteTxFn1", nil)
+	delTxOnAddFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnAddFn1", nil)
+	delTxOnEnqueueTxFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnEnqueueTxFn1", nil)
+	delTxOnPromoteTxFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteTxFn1", nil)
+	delTxOnPromoteTxFn2Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteTxFn2", nil)
+	delTxOnRemoveTxFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnRemoveTxFn1", nil)
+	delTxOnPromoteExecutablesFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteExecutablesFn1", nil)
+	delTxOnPromoteExecutablesFn2Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteExecutablesFn2", nil)
+	delTxOnPromoteExecutablesFn3Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteExecutablesFn3", nil)
+	delTxOnPromoteExecutablesFn4Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnPromoteExecutablesFn4", nil)
+	delTxOnDemoteUnexecutablesFn1Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnDemoteUnexecutablesFn1", nil)
+	delTxOnDemoteUnexecutablesFn2Counter = metrics.NewRegisteredCounter("txpool/fn/delTxOnDemoteUnexecutablesFn2", nil)
 )
 
 // TxStatus is the current status of a transaction as seen by the pool.
@@ -159,6 +176,70 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 	return conf
 }
 
+var txUpdateMetricMap = map[txAllUpdateType]metrics.Counter{
+	addTxOnAddFn1: addTxOnAddFn1Counter,
+	addTxOnEnqueueTxFn1: addTxOnEnqueueTxFn1Counter,
+	addTxOnPromoteTxFn1: addTxOnPromoteTxFn1Counter,
+	delTxOnAddFn1: delTxOnAddFn1Counter,
+	delTxOnEnqueueTxFn1: delTxOnEnqueueTxFn1Counter,
+	delTxOnPromoteTxFn1: delTxOnPromoteTxFn1Counter,
+	delTxOnPromoteTxFn2: delTxOnPromoteTxFn2Counter,
+	delTxOnRemoveTxFn1: delTxOnRemoveTxFn1Counter,
+	delTxOnPromoteExecutablesFn1: delTxOnPromoteExecutablesFn1Counter,
+	delTxOnPromoteExecutablesFn2: delTxOnPromoteExecutablesFn2Counter,
+	delTxOnPromoteExecutablesFn3: delTxOnPromoteExecutablesFn3Counter,
+	delTxOnPromoteExecutablesFn4: delTxOnPromoteExecutablesFn4Counter,
+	delTxOnDemoteUnexecutablesFn1: delTxOnDemoteUnexecutablesFn1Counter,
+	delTxOnDemoteUnexecutablesFn2: delTxOnDemoteUnexecutablesFn2Counter,
+}
+
+type txAll map[common.Hash]*types.Transaction
+
+func (a txAll) Delete(hash common.Hash, typ txAllUpdateType) {
+	delete(a, hash)
+
+	counter, ok := txUpdateMetricMap[typ]
+	if !ok {
+		logger.Error("Failed to count metric", "type", typ)
+		return
+	}
+	counter.Inc(1)
+}
+
+func (a txAll) Add(hash common.Hash, tx *types.Transaction, typ txAllUpdateType) {
+	a[hash] = tx
+
+	counter, ok := txUpdateMetricMap[typ]
+	if !ok {
+		logger.Error("Failed to count metric", "type", typ)
+		return
+	}
+	counter.Inc(1)
+}
+
+func (a txAll) Pointer() *map[common.Hash]*types.Transaction {
+	return (*map[common.Hash]*types.Transaction)(&a)
+}
+
+type txAllUpdateType string
+
+const (
+	addTxOnAddFn1 txAllUpdateType = "addTxOnAddFn1"
+	addTxOnEnqueueTxFn1 txAllUpdateType = "addTxOnEnqueueTxFn1"
+	addTxOnPromoteTxFn1 txAllUpdateType = "addTxOnPromoteTxFn1"
+	delTxOnAddFn1 txAllUpdateType = "delTxOnAddFn1"
+	delTxOnEnqueueTxFn1 txAllUpdateType = "delTxOnEnqueueTxFn1"
+	delTxOnPromoteTxFn1 txAllUpdateType = "delTxOnPromoteTxFn1"
+	delTxOnPromoteTxFn2 txAllUpdateType = "delTxOnPromoteTxFn2"
+	delTxOnRemoveTxFn1 txAllUpdateType = "delTxOnRemoveTxFn1"
+	delTxOnPromoteExecutablesFn1 txAllUpdateType = "delTxOnPromoteExecutablesFn1"
+	delTxOnPromoteExecutablesFn2 txAllUpdateType = "delTxOnPromoteExecutablesFn2"
+	delTxOnPromoteExecutablesFn3 txAllUpdateType = "delTxOnPromoteExecutablesFn3"
+	delTxOnPromoteExecutablesFn4 txAllUpdateType = "delTxOnPromoteExecutablesFn4"
+	delTxOnDemoteUnexecutablesFn1 txAllUpdateType = "delTxOnDemoteUnexecutablesFn1"
+	delTxOnDemoteUnexecutablesFn2 txAllUpdateType = "delTxOnDemoteUnexecutablesFn2"
+)
+
 // TxPool contains all currently known transactions. Transactions
 // enter the pool when they are received from the network or submitted
 // locally. They exit the pool when they are included in the blockchain.
@@ -188,11 +269,11 @@ type TxPool struct {
 	//TODO-Klaytn
 	txMu sync.RWMutex
 
-	pending map[common.Address]*txList         // All currently processable transactions
-	queue   map[common.Address]*txList         // Queued but non-processable transactions
-	beats   map[common.Address]time.Time       // Last heartbeat from each known account
-	all     map[common.Hash]*types.Transaction // All transactions to allow lookups
-	priced  *txPricedList                      // All transactions sorted by price
+	pending map[common.Address]*txList   // All currently processable transactions
+	queue   map[common.Address]*txList   // Queued but non-processable transactions
+	beats   map[common.Address]time.Time // Last heartbeat from each known account
+	all     txAll                        // All transactions to allow lookups
+	priced  *txPricedList                // All transactions sorted by price
 
 	wg sync.WaitGroup // for shutdown sync
 
@@ -221,7 +302,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		txMsgCh:      make(chan types.Transactions, txMsgChSize),
 	}
 	pool.locals = newAccountSet(pool.signer)
-	pool.priced = newTxPricedList(&pool.all)
+	pool.priced = newTxPricedList(pool.all.Pointer())
 	pool.reset(nil, chain.CurrentBlock().Header())
 
 	// If local transactions and journaling is enabled, load from disk
@@ -308,6 +389,7 @@ func (pool *TxPool) loop() {
 				prevPending, prevQueued, prevStales = pending, queued, stales
 				txPoolPendingGauge.Update(int64(pending))
 				txPoolQueueGauge.Update(int64(queued))
+				txPoolAllGauge.Update(int64(len(pool.all)))
 			}
 
 			// Handle inactive account transaction eviction
@@ -492,7 +574,7 @@ func (pool *TxPool) SetGasPrice(price *big.Int) {
 		pool.all = make(map[common.Hash]*types.Transaction)
 		pool.pendingNonce = make(map[common.Address]uint64)
 		pool.locals = newAccountSet(pool.signer)
-		pool.priced = newTxPricedList(&pool.all)
+		pool.priced = newTxPricedList(pool.all.Pointer())
 
 		pool.mu.Unlock()
 	}
@@ -814,11 +896,13 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (bool, error) {
 		}
 		// New transaction is better, replace old one
 		if old != nil {
-			delete(pool.all, old.Hash())
+			pool.all.Delete(old.Hash(), delTxOnAddFn1)
+			// delete(pool.all, old.Hash()) // DELETE MARK - 1
 			pool.priced.Removed()
 			pendingReplaceCounter.Inc(1)
 		}
-		pool.all[tx.Hash()] = tx
+		pool.all.Add(tx.Hash(), tx, addTxOnAddFn1)
+		// pool.all[tx.Hash()] = tx // MARK - update 1
 		pool.priced.Put(tx)
 		pool.journalTx(from, tx)
 
@@ -861,12 +945,14 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction) (bool, er
 	}
 	// Discard any previous transaction and mark this
 	if old != nil {
-		delete(pool.all, old.Hash())
+		pool.all.Delete(old.Hash(), delTxOnEnqueueTxFn1)
+		// delete(pool.all, old.Hash()) // DELETE MARK - 2
 		pool.priced.Removed()
 		queuedReplaceCounter.Inc(1)
 	}
 	if pool.all[hash] == nil {
-		pool.all[hash] = tx
+		pool.all.Add(hash, tx, addTxOnEnqueueTxFn1)
+		// pool.all[hash] = tx // MARK - update 2
 		pool.priced.Put(tx)
 	}
 
@@ -900,7 +986,8 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	inserted, old := list.Add(tx, pool.config.PriceBump)
 	if !inserted {
 		// An older transaction was better, discard this
-		delete(pool.all, hash)
+		pool.all.Delete(hash, delTxOnPromoteTxFn1)
+		// delete(pool.all, hash) // DELETE MARK - 3
 		pool.priced.Removed()
 
 		pendingDiscardCounter.Inc(1)
@@ -908,14 +995,16 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	}
 	// Otherwise discard any previous transaction and mark this
 	if old != nil {
-		delete(pool.all, old.Hash())
+		pool.all.Delete(old.Hash(), delTxOnPromoteTxFn2)
+		// delete(pool.all, old.Hash()) // DELETE MARK - 4
 		pool.priced.Removed()
 
 		pendingReplaceCounter.Inc(1)
 	}
 	// Failsafe to work around direct pending inserts (tests)
 	if pool.all[hash] == nil {
-		pool.all[hash] = tx
+		pool.all.Add(hash, tx, addTxOnPromoteTxFn1)
+		// pool.all[hash] = tx // MARK - update 3
 		pool.priced.Put(tx)
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
@@ -1062,10 +1151,12 @@ func (pool *TxPool) AddLocal(tx *types.Transaction) error {
 	if tx.Type().IsChainDataAnchoring() && !pool.config.AllowLocalAnchorTx {
 		return errNotAllowedAnchoringTx
 	}
-
 	pool.mu.RLock()
 	poolSize := uint64(len(pool.all))
 	pool.mu.RUnlock()
+
+	addLocalFnCounter.Inc(1)
+
 	if poolSize >= pool.config.ExecSlotsAll+pool.config.NonExecSlotsAll {
 		return fmt.Errorf("txpool is full: %d", poolSize)
 	}
@@ -1225,7 +1316,8 @@ func (pool *TxPool) removeTx(hash common.Hash, outofbound bool) {
 	addr, _ := types.Sender(pool.signer, tx) // already validated during insertion
 
 	// Remove it from the list of known transactions
-	delete(pool.all, hash)
+	pool.all.Delete(hash, delTxOnRemoveTxFn1)
+	//delete(pool.all, hash) // DELETE MARK - 5
 	if outofbound {
 		pool.priced.Removed()
 	}
@@ -1280,7 +1372,8 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 		for _, tx := range list.Forward(pool.getNonce(addr)) {
 			hash := tx.Hash()
 			logger.Trace("Removed old queued transaction", "hash", hash)
-			delete(pool.all, hash)
+			pool.all.Delete(hash, delTxOnPromoteExecutablesFn1)
+			// delete(pool.all, hash) // DELETE MARK - 7
 			pool.priced.Removed()
 		}
 		// Drop all transactions that are too costly (low balance)
@@ -1288,7 +1381,8 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 		for _, tx := range drops {
 			hash := tx.Hash()
 			logger.Trace("Removed unpayable queued transaction", "hash", hash)
-			delete(pool.all, hash)
+			pool.all.Delete(hash, delTxOnPromoteExecutablesFn2)
+			//delete(pool.all, hash) // DELETE MARK - 8
 			pool.priced.Removed()
 			queuedNofundsCounter.Inc(1)
 		}
@@ -1305,7 +1399,8 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 		if !pool.locals.contains(addr) {
 			for _, tx := range list.Cap(int(pool.config.NonExecSlotsAccount)) {
 				hash := tx.Hash()
-				delete(pool.all, hash)
+				pool.all.Delete(hash, delTxOnPromoteExecutablesFn3)
+				//delete(pool.all, hash) // DELETE MARK - 9
 				pool.priced.Removed()
 				queuedRateLimitCounter.Inc(1)
 				logger.Trace("Removed cap-exceeding queued transaction", "hash", hash)
@@ -1375,7 +1470,8 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 					for _, tx := range list.Cap(list.Len() - 1) {
 						// Drop the transaction from the global pools too
 						hash := tx.Hash()
-						delete(pool.all, hash)
+						pool.all.Delete(hash, delTxOnPromoteExecutablesFn4)
+						//delete(pool.all, hash) // DELETE MARK - 10
 						pool.priced.Removed()
 
 						// Update the account nonce to the dropped transaction
@@ -1449,7 +1545,8 @@ func (pool *TxPool) demoteUnexecutables() {
 		for _, tx := range list.Forward(nonce) {
 			hash := tx.Hash()
 			logger.Trace("Removed old pending transaction", "hash", hash)
-			delete(pool.all, hash)
+			pool.all.Delete(hash, delTxOnDemoteUnexecutablesFn1)
+			//delete(pool.all, hash) // DELETE MARK - 11
 			pool.priced.Removed()
 		}
 
@@ -1466,7 +1563,8 @@ func (pool *TxPool) demoteUnexecutables() {
 		for _, tx := range drops {
 			hash := tx.Hash()
 			logger.Trace("Removed unexecutable pending transaction", "hash", hash)
-			delete(pool.all, hash)
+			pool.all.Delete(hash, delTxOnDemoteUnexecutablesFn2)
+			//delete(pool.all, hash) // DELETE MARK - 12
 			pool.priced.Removed()
 			pendingNofundsCounter.Inc(1)
 		}
