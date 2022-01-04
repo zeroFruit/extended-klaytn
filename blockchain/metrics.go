@@ -42,4 +42,5 @@ var (
 
 	txPoolPendingGauge = metrics.NewRegisteredGauge("tx/pool/pending/gauge", nil)
 	txPoolQueueGauge   = metrics.NewRegisteredGauge("tx/pool/queue/gauge", nil)
+	txPoolAllGauge   = metrics.NewRegisteredGauge("tx/pool/all/gauge", nil)
 )
